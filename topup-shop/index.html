@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="id">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#102b26">
+    <meta name="description" content="Pilih paket top-up game dan kirim detail pesanan untuk diproses admin.">
+    <title>LevelUp Supply | Top-up Game</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700;800&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="styles.css">
+    <script src="app.js" defer></script>
+  </head>
+  <body>
+    <header class="topbar">
+      <a class="brand" href="#top" aria-label="LevelUp Supply, beranda">
+        <span class="brand-mark" aria-hidden="true">L</span>
+        <span>LEVELUP<span class="brand-light">SUPPLY</span></span>
+      </a>
+      <nav class="topnav" aria-label="Navigasi utama">
+        <a class="nav-current" href="#catalog">Katalog</a>
+        <a href="#how-it-works">Cara pesan</a>
+      </nav>
+      <a class="support-link" href="#order">Buat pesanan <span aria-hidden="true">↗</span></a>
+    </header>
+
+    <main id="top">
+      <section class="masthead" aria-labelledby="hero-title">
+        <div class="masthead-copy">
+          <p class="eyebrow"><span class="live-dot"></span> TOKO TOP-UP GAME</p>
+          <h1 id="hero-title">Lanjut main.<br><span>Jangan sampai kehabisan.</span></h1>
+          <p class="hero-description">Pilih game, masukkan ID pemain, dan kirim pesanan untuk dicek admin.</p>
+          <a class="hero-action" href="#catalog">Pilih game <span aria-hidden="true">↓</span></a>
+        </div>
+        <div class="masthead-art" role="img" aria-label="Suasana gaming dan perangkat permainan">
+          <div class="art-stamp">PLAY<br>ON<span>+</span></div>
+          <div class="art-caption"><span>TOP-UP</span><strong>GAME CREDITS</strong></div>
+        </div>
+        <div class="masthead-note"><span>01</span> Pilih paket <i></i> <span>02</span> Isi ID game <i></i> <span>03</span> Konfirmasi admin</div>
+      </section>
+
+      <section class="shop-layout" id="catalog" aria-labelledby="catalog-title">
+        <div class="catalog-column">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">KATALOG</p>
+              <h2 id="catalog-title">Pilih game</h2>
+            </div>
+            <label class="search-box">
+              <span class="sr-only">Cari game</span>
+              <span aria-hidden="true">⌕</span>
+              <input id="game-search" type="search" placeholder="Cari game" autocomplete="off">
+            </label>
+          </div>
+
+          <div class="game-list" id="game-list" role="group" aria-label="Daftar game"></div>
+
+          <div class="package-heading">
+            <div>
+              <p class="eyebrow">PILIH NOMINAL</p>
+              <h3 id="package-title">Paket tersedia</h3>
+            </div>
+            <span class="price-note">Harga sementara</span>
+          </div>
+          <div class="package-grid" id="package-list" aria-live="polite"></div>
+          <p class="catalog-disclaimer">Harga katalog masih sementara. Admin akan mengonfirmasi stok dan harga sebelum pembayaran.</p>
+        </div>
+
+        <aside class="order-panel" id="order" aria-labelledby="order-title">
+          <div class="order-panel-head">
+            <div>
+              <p class="eyebrow">PESANAN</p>
+              <h2 id="order-title">Detail pemain</h2>
+            </div>
+            <span class="order-number">01 / 03</span>
+          </div>
+
+          <form id="order-form" novalidate>
+            <label class="field-label" for="player-id">User ID / Player ID</label>
+            <input class="text-input" id="player-id" name="playerId" type="text" inputmode="numeric" maxlength="24" placeholder="Contoh: 123456789" required>
+            <p class="field-hint" id="player-hint">Masukkan ID sesuai profil di dalam game.</p>
+
+            <div id="zone-field" class="zone-field">
+              <label class="field-label" for="zone-id">Zone ID</label>
+              <input class="text-input" id="zone-id" name="zoneId" type="text" inputmode="numeric" maxlength="12" placeholder="Contoh: 1234">
+            </div>
+
+            <div class="selected-package" id="selected-package" aria-live="polite"></div>
+            <button class="primary-button" type="submit">Lanjut ke pembayaran <span aria-hidden="true">→</span></button>
+          </form>
+
+          <section class="payment-details" id="payment-details" hidden aria-labelledby="payment-title">
+            <div class="payment-rule"></div>
+            <p class="eyebrow">PEMBAYARAN MANUAL</p>
+            <h3 id="payment-title">Transfer via DANA</h3>
+            <p class="payment-copy">Tunggu konfirmasi stok dan total akhir dari admin sebelum transfer.</p>
+            <div class="recipient-row">
+              <div><span>Tujuan DANA</span><strong id="dana-number">085707058873</strong></div>
+              <button class="copy-button" id="copy-number" type="button" aria-label="Salin nomor DANA" title="Salin nomor">Salin</button>
+            </div>
+            <div class="recipient-row total-row">
+              <div><span>Total sementara</span><strong id="order-total">Rp0</strong></div>
+              <span class="pending-tag">CEK ADMIN</span>
+            </div>
+            <p class="payment-warning">Pastikan nama penerima DANA cocok sebelum transfer. Jangan bayar jika nama penerima berbeda atau stok belum dikonfirmasi.</p>
+            <a class="whatsapp-button" id="send-order" href="#" target="_blank" rel="noopener noreferrer">Kirim detail ke admin <span aria-hidden="true">↗</span></a>
+            <p class="manual-note">Pesanan diproses manual setelah pembayaran diverifikasi. Simpan bukti transfer dan kirimkan kepada admin.</p>
+            <button class="text-button" id="edit-order" type="button">Ubah detail pesanan</button>
+          </section>
+          <p class="form-message" id="form-message" role="status" aria-live="polite"></p>
+        </aside>
+      </section>
+
+      <section class="how-section" id="how-it-works" aria-labelledby="how-title">
+        <div class="how-title-block">
+          <p class="eyebrow">ALUR PESAN</p>
+          <h2 id="how-title">Jelas dari awal.</h2>
+        </div>
+        <ol class="steps-list">
+          <li><span>01</span><div><strong>Pilih paket</strong><p>Pilih game dan nominal yang dibutuhkan.</p></div></li>
+          <li><span>02</span><div><strong>Isi ID pemain</strong><p>Pastikan User ID dan Zone ID benar.</p></div></li>
+          <li><span>03</span><div><strong>Konfirmasi & bayar</strong><p>Admin cek stok dan harga, lalu verifikasi pembayaran DANA.</p></div></li>
+        </ol>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <a class="brand footer-brand" href="#top"><span class="brand-mark" aria-hidden="true">L</span><span>LEVELUP<span class="brand-light">SUPPLY</span></span></a>
+      <p>Pesanan diproses setelah detail, stok, dan pembayaran diverifikasi admin.</p>
+      <span class="footer-region">INDONESIA · DANA</span>
+    </footer>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  </body>
+</html>
