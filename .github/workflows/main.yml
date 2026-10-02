@@ -1,18 +1,46 @@
-name: Windows RDP 7 Jam
+name: Windows RDP 7 Hours
 
 on:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   rdp:
-    runs-on: windows-latest
+    runs-on: windows-2025
     timeout-minutes: 420
 
     steps:
 
-      # ==========================================
-      # ENABLE RDP
-      # ==========================================
+      # =========================================
+      # 1. CHECK SECRETS
+      # =========================================
+      - name: Check required secrets
+        shell: powershell
+        env:
+          RDP_PASSWORD: ${{ secrets.RDP_PASSWORD }}
+          NGROK_AUTHTOKEN: ${{ secrets.NGROK_AUTHTOKEN }}
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          if ([string]::IsNullOrWhiteSpace($env:RDP_PASSWORD)) {
+              throw "RDP_PASSWORD belum dibuat di GitHub Secrets."
+          }
+
+          if ([string]::IsNullOrWhiteSpace($env:NGROK_AUTHTOKEN)) {
+              throw "NGROK_AUTHTOKEN belum dibuat di GitHub Secrets."
+          }
+
+          if ($env:RDP_PASSWORD.Length -lt 8) {
+              throw "RDP_PASSWORD minimal 8 karakter."
+          }
+
+          Write-Host "Secrets tersedia."
+
+      # =========================================
+      # 2. ENABLE RDP
+      # =========================================
       - name: Enable Remote Desktop
         shell: powershell
         env:
@@ -22,70 +50,108 @@ jobs:
 
           Write-Host "Mengaktifkan Remote Desktop..."
 
+          # Enable RDP
           Set-ItemProperty `
-            -Path "HKLM:\System\CurrentControlSet\Control\Terminal Server" `
+            -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server" `
             -Name "fDenyTSConnections" `
             -Value 0
 
+          # Enable NLA
           Set-ItemProperty `
-            -Path "HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" `
+            -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" `
             -Name "UserAuthentication" `
             -Value 1
 
+          # Firewall
           Enable-NetFirewallRule `
             -DisplayGroup "Remote Desktop"
 
+          # RDP account
           $username = "rdpuser"
 
-          $password = ConvertTo-SecureString `
+          $securePassword = ConvertTo-SecureString `
             $env:RDP_PASSWORD `
             -AsPlainText `
             -Force
 
-          if (Get-LocalUser -Name $username -ErrorAction SilentlyContinue) {
-              Set-LocalUser `
-                -Name $username `
-                -Password $password
-          }
-          else {
+          $user = Get-LocalUser `
+            -Name $username `
+            -ErrorAction SilentlyContinue
+
+          if ($null -eq $user) {
+
               New-LocalUser `
                 -Name $username `
-                -Password $password `
+                -Password $securePassword `
                 -PasswordNeverExpires `
-                -UserMayNotChangePassword
+                -UserMayNotChangePassword `
+                -AccountNeverExpires
+
+              Write-Host "User rdpuser dibuat."
+
+          } else {
+
+              Set-LocalUser `
+                -Name $username `
+                -Password $securePassword
+
+              Write-Host "Password rdpuser diperbarui."
           }
 
+          # Allow RDP login
           Add-LocalGroupMember `
             -Group "Remote Desktop Users" `
             -Member $username `
             -ErrorAction SilentlyContinue
 
-          Restart-Service TermService -Force
+          # Make sure account is enabled
+          Enable-LocalUser -Name $username
 
-          Write-Host "RDP berhasil diaktifkan."
+          # Restart RDP service
+          Set-Service `
+            -Name TermService `
+            -StartupType Automatic
 
-      # ==========================================
-      # INSTALL APPLICATIONS
-      # ==========================================
-      - name: Install Chrome, 7-Zip, VLC and Steam
+          Restart-Service `
+            -Name TermService `
+            -Force
+
+          Write-Host "================================="
+          Write-Host "RDP BERHASIL DIAKTIFKAN"
+          Write-Host "Username: rdpuser"
+          Write-Host "================================="
+
+      # =========================================
+      # 3. CHECK WINDOWS / SOFTWARE
+      # =========================================
+      - name: Check Windows environment
+        shell: powershell
+        run: |
+          Write-Host "Windows:"
+          Get-CimInstance Win32_OperatingSystem |
+            Select-Object Caption, Version, OSArchitecture
+
+          Write-Host ""
+          Write-Host "Chrome:"
+          $chrome = Get-Command chrome.exe -ErrorAction SilentlyContinue
+
+          if ($chrome) {
+              Write-Host "Chrome tersedia: $($chrome.Source)"
+          } else {
+              Write-Host "Chrome tidak ditemukan."
+          }
+
+      # =========================================
+      # 4. INSTALL EXTRA APPS
+      # =========================================
+      - name: Install 7-Zip, VLC and Steam
         shell: powershell
         run: |
           $ErrorActionPreference = "Continue"
 
-          Write-Host "Memperbarui winget sources..."
+          Write-Host "Memasang aplikasi..."
 
           winget source update
-
-          Write-Host "Install Google Chrome..."
-
-          winget install `
-            --id Google.Chrome `
-            --exact `
-            --silent `
-            --accept-package-agreements `
-            --accept-source-agreements
-
-          Write-Host "Install 7-Zip..."
 
           winget install `
             --id 7zip.7zip `
@@ -94,16 +160,12 @@ jobs:
             --accept-package-agreements `
             --accept-source-agreements
 
-          Write-Host "Install VLC..."
-
           winget install `
             --id VideoLAN.VLC `
             --exact `
             --silent `
             --accept-package-agreements `
             --accept-source-agreements
-
-          Write-Host "Install Steam..."
 
           winget install `
             --id Valve.Steam `
@@ -113,39 +175,61 @@ jobs:
             --accept-source-agreements
 
           Write-Host ""
-          Write-Host "=========================================="
-          Write-Host "APLIKASI SELESAI DIPROSES"
-          Write-Host "=========================================="
+          Write-Host "Aplikasi selesai diproses."
 
-      # ==========================================
-      # INSTALL NGROK
-      # ==========================================
+      # =========================================
+      # 5. INSTALL NGROK
+      # =========================================
       - name: Install ngrok
         shell: powershell
         run: |
           $ErrorActionPreference = "Stop"
 
-          $url = "https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-windows-amd64.zip"
+          Write-Host "Memasang ngrok..."
 
-          Invoke-WebRequest `
-            -Uri $url `
-            -OutFile "$env:TEMP\ngrok.zip"
+          winget install `
+            --id ngrok `
+            --exact `
+            --silent `
+            --accept-package-agreements `
+            --accept-source-agreements
 
-          Expand-Archive `
-            -Path "$env:TEMP\ngrok.zip" `
-            -DestinationPath "$env:TEMP\ngrok" `
-            -Force
+          $ngrok = Get-Command ngrok.exe `
+            -ErrorAction SilentlyContinue
 
-          Copy-Item `
-            "$env:TEMP\ngrok\ngrok.exe" `
-            "$env:WINDIR\System32\ngrok.exe" `
-            -Force
+          if ($null -eq $ngrok) {
+
+              $paths = @(
+                "$env:LOCALAPPDATA\Microsoft\WinGet\Packages",
+                "$env:ProgramFiles",
+                "$env:ProgramFiles(x86)"
+              )
+
+              foreach ($path in $paths) {
+
+                  if (Test-Path $path) {
+
+                      $found = Get-ChildItem `
+                        -Path $path `
+                        -Filter "ngrok.exe" `
+                        -Recurse `
+                        -ErrorAction SilentlyContinue |
+                        Select-Object -First 1
+
+                      if ($found) {
+                          $dir = Split-Path $found.FullName
+                          $env:PATH += ";$dir"
+                          break
+                      }
+                  }
+              }
+          }
 
           ngrok version
 
-      # ==========================================
-      # START RDP TUNNEL
-      # ==========================================
+      # =========================================
+      # 6. START NGROK
+      # =========================================
       - name: Start RDP Tunnel
         shell: powershell
         env:
@@ -153,106 +237,123 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
 
+          Write-Host "Mengonfigurasi ngrok..."
+
           ngrok config add-authtoken `
             $env:NGROK_AUTHTOKEN
 
+          Write-Host "Memulai tunnel RDP..."
+
           Start-Process `
             -FilePath "ngrok.exe" `
-            -ArgumentList "tcp 3389 --log=stdout" `
+            -ArgumentList "tcp 3389" `
             -WindowStyle Hidden
-
-          Write-Host "Menunggu tunnel..."
 
           $tunnel = $null
 
-          for ($i = 0; $i -lt 30; $i++) {
+          Write-Host "Menunggu alamat RDP..."
+
+          for ($i = 1; $i -le 30; $i++) {
+
+              Start-Sleep -Seconds 2
 
               try {
-                  $tunnel = Invoke-RestMethod `
+
+                  $response = Invoke-RestMethod `
                     -Uri "http://127.0.0.1:4040/api/tunnels" `
                     -ErrorAction Stop
 
-                  if ($tunnel.tunnels.Count -gt 0) {
+                  if ($response.tunnels.Count -gt 0) {
+                      $tunnel = $response.tunnels[0]
                       break
                   }
+
+              } catch {
+
+                  Write-Host "Tunnel belum siap..."
               }
-              catch {}
-
-              Start-Sleep -Seconds 2
           }
 
-          if (
-              $null -eq $tunnel -or
-              $tunnel.tunnels.Count -eq 0
-          ) {
-              Write-Error "Tunnel gagal dibuat."
-              exit 1
+          if ($null -eq $tunnel) {
+              throw "ngrok gagal membuat tunnel RDP."
           }
 
-          $publicUrl = $tunnel.tunnels[0].public_url
+          $publicUrl = $tunnel.public_url
 
           Write-Host ""
-          Write-Host "=========================================="
-          Write-Host "           WINDOWS RDP READY"
-          Write-Host "=========================================="
+          Write-Host "=============================================="
+          Write-Host "             RDP SIAP DIGUNAKAN"
+          Write-Host "=============================================="
           Write-Host ""
-          Write-Host "RDP ADDRESS : $publicUrl"
-          Write-Host "USERNAME    : rdpuser"
-          Write-Host "PASSWORD    : RDP_PASSWORD"
+          Write-Host "ADDRESS : $publicUrl"
+          Write-Host "USER    : rdpuser"
+          Write-Host "PASSWORD: RDP_PASSWORD"
           Write-Host ""
-          Write-Host "APLIKASI:"
-          Write-Host "- Google Chrome"
-          Write-Host "- 7-Zip"
-          Write-Host "- VLC"
-          Write-Host "- Steam"
+          Write-Host "DURASI  : MAKSIMAL 7 JAM"
           Write-Host ""
-          Write-Host "BATAS       : 7 JAM"
-          Write-Host "=========================================="
+          Write-Host "=============================================="
           Write-Host ""
 
-      # ==========================================
-      # 7 HOUR TIMER
-      # ==========================================
-      - name: Keep RDP Alive - 7 Hours
+          # Simpan alamat sebagai output step
+          "RDP_ADDRESS=$publicUrl" >> $env:GITHUB_ENV
+
+      # =========================================
+      # 7. KEEP ALIVE 7 HOURS
+      # =========================================
+      - name: Keep RDP Alive - Maximum 7 Hours
         shell: powershell
         run: |
+          $maximumSeconds = 7 * 60 * 60
 
-          $maxSeconds = 7 * 60 * 60
           $startTime = Get-Date
+          $endTime = $startTime.AddHours(7)
 
           Write-Host ""
-          Write-Host "=========================================="
-          Write-Host "         RDP SESSION AKTIF"
-          Write-Host "=========================================="
+          Write-Host "=============================================="
+          Write-Host "              RDP SESSION AKTIF"
+          Write-Host "=============================================="
+          Write-Host "Mulai : $startTime"
+          Write-Host "Selesai maksimal : $endTime"
+          Write-Host "=============================================="
           Write-Host ""
 
           while ($true) {
 
-              $elapsed = `
+              $elapsed =
                 ((Get-Date) - $startTime).TotalSeconds
 
-              if ($elapsed -ge $maxSeconds) {
+              if ($elapsed -ge $maximumSeconds) {
 
                   Write-Host ""
-                  Write-Host "=========================================="
+                  Write-Host "=============================================="
                   Write-Host "          BATAS 7 JAM TERCAPAI"
-                  Write-Host "=========================================="
-                  Write-Host ""
+                  Write-Host "=============================================="
 
+                  # Hentikan tunnel
+                  Get-Process ngrok `
+                    -ErrorAction SilentlyContinue |
+                    Stop-Process -Force
+
+                  # Hentikan RDP
+                  Stop-Service TermService `
+                    -Force `
+                    -ErrorAction SilentlyContinue
+
+                  Write-Host "RDP dan ngrok dihentikan."
                   exit 0
               }
 
-              $remaining = `
+              $remaining =
                 [TimeSpan]::FromSeconds(
-                  $maxSeconds - $elapsed
+                  $maximumSeconds - $elapsed
                 )
 
               Write-Host `
                 "[$(Get-Date -Format 'HH:mm:ss')] " +
                 "Sisa: " +
-                "$($remaining.Hours)j " +
-                "$($remaining.Minutes)m " +
-                "$($remaining.Seconds)d"
+                "$($remaining.Hours) jam " +
+                "$($remaining.Minutes) menit " +
+                "$($remaining.Seconds) detik"
 
               Start-Sleep -Seconds 60
           }
