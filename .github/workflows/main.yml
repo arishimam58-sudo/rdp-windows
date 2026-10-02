@@ -1,0 +1,258 @@
+name: Windows RDP 7 Jam
+
+on:
+  workflow_dispatch:
+
+jobs:
+  rdp:
+    runs-on: windows-latest
+    timeout-minutes: 420
+
+    steps:
+
+      # ==========================================
+      # ENABLE RDP
+      # ==========================================
+      - name: Enable Remote Desktop
+        shell: powershell
+        env:
+          RDP_PASSWORD: ${{ secrets.RDP_PASSWORD }}
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          Write-Host "Mengaktifkan Remote Desktop..."
+
+          Set-ItemProperty `
+            -Path "HKLM:\System\CurrentControlSet\Control\Terminal Server" `
+            -Name "fDenyTSConnections" `
+            -Value 0
+
+          Set-ItemProperty `
+            -Path "HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" `
+            -Name "UserAuthentication" `
+            -Value 1
+
+          Enable-NetFirewallRule `
+            -DisplayGroup "Remote Desktop"
+
+          $username = "rdpuser"
+
+          $password = ConvertTo-SecureString `
+            $env:RDP_PASSWORD `
+            -AsPlainText `
+            -Force
+
+          if (Get-LocalUser -Name $username -ErrorAction SilentlyContinue) {
+              Set-LocalUser `
+                -Name $username `
+                -Password $password
+          }
+          else {
+              New-LocalUser `
+                -Name $username `
+                -Password $password `
+                -PasswordNeverExpires `
+                -UserMayNotChangePassword
+          }
+
+          Add-LocalGroupMember `
+            -Group "Remote Desktop Users" `
+            -Member $username `
+            -ErrorAction SilentlyContinue
+
+          Restart-Service TermService -Force
+
+          Write-Host "RDP berhasil diaktifkan."
+
+      # ==========================================
+      # INSTALL APPLICATIONS
+      # ==========================================
+      - name: Install Chrome, 7-Zip, VLC and Steam
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Continue"
+
+          Write-Host "Memperbarui winget sources..."
+
+          winget source update
+
+          Write-Host "Install Google Chrome..."
+
+          winget install `
+            --id Google.Chrome `
+            --exact `
+            --silent `
+            --accept-package-agreements `
+            --accept-source-agreements
+
+          Write-Host "Install 7-Zip..."
+
+          winget install `
+            --id 7zip.7zip `
+            --exact `
+            --silent `
+            --accept-package-agreements `
+            --accept-source-agreements
+
+          Write-Host "Install VLC..."
+
+          winget install `
+            --id VideoLAN.VLC `
+            --exact `
+            --silent `
+            --accept-package-agreements `
+            --accept-source-agreements
+
+          Write-Host "Install Steam..."
+
+          winget install `
+            --id Valve.Steam `
+            --exact `
+            --silent `
+            --accept-package-agreements `
+            --accept-source-agreements
+
+          Write-Host ""
+          Write-Host "=========================================="
+          Write-Host "APLIKASI SELESAI DIPROSES"
+          Write-Host "=========================================="
+
+      # ==========================================
+      # INSTALL NGROK
+      # ==========================================
+      - name: Install ngrok
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $url = "https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-windows-amd64.zip"
+
+          Invoke-WebRequest `
+            -Uri $url `
+            -OutFile "$env:TEMP\ngrok.zip"
+
+          Expand-Archive `
+            -Path "$env:TEMP\ngrok.zip" `
+            -DestinationPath "$env:TEMP\ngrok" `
+            -Force
+
+          Copy-Item `
+            "$env:TEMP\ngrok\ngrok.exe" `
+            "$env:WINDIR\System32\ngrok.exe" `
+            -Force
+
+          ngrok version
+
+      # ==========================================
+      # START RDP TUNNEL
+      # ==========================================
+      - name: Start RDP Tunnel
+        shell: powershell
+        env:
+          NGROK_AUTHTOKEN: ${{ secrets.NGROK_AUTHTOKEN }}
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          ngrok config add-authtoken `
+            $env:NGROK_AUTHTOKEN
+
+          Start-Process `
+            -FilePath "ngrok.exe" `
+            -ArgumentList "tcp 3389 --log=stdout" `
+            -WindowStyle Hidden
+
+          Write-Host "Menunggu tunnel..."
+
+          $tunnel = $null
+
+          for ($i = 0; $i -lt 30; $i++) {
+
+              try {
+                  $tunnel = Invoke-RestMethod `
+                    -Uri "http://127.0.0.1:4040/api/tunnels" `
+                    -ErrorAction Stop
+
+                  if ($tunnel.tunnels.Count -gt 0) {
+                      break
+                  }
+              }
+              catch {}
+
+              Start-Sleep -Seconds 2
+          }
+
+          if (
+              $null -eq $tunnel -or
+              $tunnel.tunnels.Count -eq 0
+          ) {
+              Write-Error "Tunnel gagal dibuat."
+              exit 1
+          }
+
+          $publicUrl = $tunnel.tunnels[0].public_url
+
+          Write-Host ""
+          Write-Host "=========================================="
+          Write-Host "           WINDOWS RDP READY"
+          Write-Host "=========================================="
+          Write-Host ""
+          Write-Host "RDP ADDRESS : $publicUrl"
+          Write-Host "USERNAME    : rdpuser"
+          Write-Host "PASSWORD    : RDP_PASSWORD"
+          Write-Host ""
+          Write-Host "APLIKASI:"
+          Write-Host "- Google Chrome"
+          Write-Host "- 7-Zip"
+          Write-Host "- VLC"
+          Write-Host "- Steam"
+          Write-Host ""
+          Write-Host "BATAS       : 7 JAM"
+          Write-Host "=========================================="
+          Write-Host ""
+
+      # ==========================================
+      # 7 HOUR TIMER
+      # ==========================================
+      - name: Keep RDP Alive - 7 Hours
+        shell: powershell
+        run: |
+
+          $maxSeconds = 7 * 60 * 60
+          $startTime = Get-Date
+
+          Write-Host ""
+          Write-Host "=========================================="
+          Write-Host "         RDP SESSION AKTIF"
+          Write-Host "=========================================="
+          Write-Host ""
+
+          while ($true) {
+
+              $elapsed = `
+                ((Get-Date) - $startTime).TotalSeconds
+
+              if ($elapsed -ge $maxSeconds) {
+
+                  Write-Host ""
+                  Write-Host "=========================================="
+                  Write-Host "          BATAS 7 JAM TERCAPAI"
+                  Write-Host "=========================================="
+                  Write-Host ""
+
+                  exit 0
+              }
+
+              $remaining = `
+                [TimeSpan]::FromSeconds(
+                  $maxSeconds - $elapsed
+                )
+
+              Write-Host `
+                "[$(Get-Date -Format 'HH:mm:ss')] " +
+                "Sisa: " +
+                "$($remaining.Hours)j " +
+                "$($remaining.Minutes)m " +
+                "$($remaining.Seconds)d"
+
+              Start-Sleep -Seconds 60
+          }
