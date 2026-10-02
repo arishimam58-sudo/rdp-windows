@@ -1,0 +1,202 @@
+name: Windows RDP 6 Hours
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  rdp:
+    runs-on: windows-2025
+    timeout-minutes: 360
+
+    steps:
+      - name: Validate secrets
+        shell: powershell
+        env:
+          RDP_PASSWORD: ${{ secrets.RDP_PASSWORD }}
+          NGROK_AUTHTOKEN: ${{ secrets.NGROK_AUTHTOKEN }}
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          if ([string]::IsNullOrWhiteSpace($env:RDP_PASSWORD)) {
+              throw "Tambahkan RDP_PASSWORD pada GitHub repository secrets."
+          }
+
+          if ($env:RDP_PASSWORD.Length -lt 16) {
+              throw "RDP_PASSWORD minimal 16 karakter."
+          }
+
+          if ([string]::IsNullOrWhiteSpace($env:NGROK_AUTHTOKEN)) {
+              throw "Tambahkan NGROK_AUTHTOKEN pada GitHub repository secrets."
+          }
+
+          "SESSION_START_UTC=$([DateTimeOffset]::UtcNow.ToUnixTimeSeconds())" |
+            Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Enable RDP
+        shell: powershell
+        env:
+          RDP_PASSWORD: ${{ secrets.RDP_PASSWORD }}
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          Set-ItemProperty `
+            -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server" `
+            -Name "fDenyTSConnections" `
+            -Value 0
+
+          Set-ItemProperty `
+            -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" `
+            -Name "UserAuthentication" `
+            -Value 1
+
+          Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
+
+          $securePassword = ConvertTo-SecureString `
+            $env:RDP_PASSWORD `
+            -AsPlainText `
+            -Force
+
+          $user = Get-LocalUser -Name "rdpuser" -ErrorAction SilentlyContinue
+          if ($null -eq $user) {
+              New-LocalUser `
+                -Name "rdpuser" `
+                -Password $securePassword `
+                -PasswordNeverExpires `
+                -UserMayNotChangePassword `
+                -AccountNeverExpires | Out-Null
+          } else {
+              Set-LocalUser -Name "rdpuser" -Password $securePassword
+          }
+
+          Add-LocalGroupMember `
+            -Group "Remote Desktop Users" `
+            -Member "rdpuser" `
+            -ErrorAction SilentlyContinue
+
+          Enable-LocalUser -Name "rdpuser"
+          Set-Service -Name TermService -StartupType Automatic
+          Restart-Service -Name TermService -Force
+
+      - name: Install desktop apps
+        shell: powershell
+        run: |
+          $packages = @(
+              "Google.Chrome",
+              "Valve.Steam",
+              "Mojang.MinecraftLauncher",
+              "7zip.7zip",
+              "VideoLAN.VLC"
+          )
+
+          foreach ($package in $packages) {
+              Write-Host "Memasang $package..."
+              winget install `
+                --id $package `
+                --exact `
+                --silent `
+                --accept-package-agreements `
+                --accept-source-agreements `
+                --disable-interactivity
+
+              if ($LASTEXITCODE -ne 0) {
+                  Write-Warning "Instalasi $package gagal (exit code $LASTEXITCODE); sesi RDP tetap dilanjutkan."
+              }
+          }
+
+      - name: Install ngrok
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          winget install `
+            --id ngrok `
+            --exact `
+            --silent `
+            --accept-package-agreements `
+            --accept-source-agreements `
+            --disable-interactivity
+
+          if ($LASTEXITCODE -ne 0) {
+              throw "Instalasi ngrok gagal dengan exit code $LASTEXITCODE."
+          }
+
+          $ngrok = Get-Command ngrok.exe -ErrorAction SilentlyContinue
+          if ($null -eq $ngrok) {
+              $found = Get-ChildItem `
+                -Path "$env:LOCALAPPDATA\Microsoft\WinGet\Packages", "$env:ProgramFiles" `
+                -Filter "ngrok.exe" `
+                -Recurse `
+                -ErrorAction SilentlyContinue |
+                Select-Object -First 1
+
+              if ($null -eq $found) {
+                  throw "ngrok.exe tidak ditemukan setelah instalasi."
+              }
+
+                Split-Path $found.FullName |
+                  Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          }
+
+          ngrok version
+
+      - name: Start RDP tunnel
+        shell: powershell
+        env:
+          NGROK_AUTHTOKEN: ${{ secrets.NGROK_AUTHTOKEN }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          ngrok config add-authtoken $env:NGROK_AUTHTOKEN
+
+          Start-Process `
+            -FilePath "ngrok.exe" `
+            -ArgumentList "tcp 3389" `
+            -WindowStyle Hidden
+
+          $tunnel = $null
+          for ($attempt = 0; $attempt -lt 30; $attempt++) {
+              Start-Sleep -Seconds 2
+              try {
+                  $response = Invoke-RestMethod `
+                    -Uri "http://127.0.0.1:4040/api/tunnels" `
+                    -ErrorAction Stop
+                  if ($response.tunnels.Count -gt 0) {
+                      $tunnel = $response.tunnels[0]
+                      break
+                  }
+              } catch {
+                  Write-Host "Menunggu tunnel Ngrok..."
+              }
+          }
+
+          if ($null -eq $tunnel) {
+              throw "Ngrok tidak berhasil membuat tunnel RDP."
+          }
+
+          Write-Host "========================================"
+          Write-Host "RDP ADDRESS : $($tunnel.public_url)"
+          Write-Host "USERNAME    : rdpuser"
+          Write-Host "PASSWORD    : gunakan secret RDP_PASSWORD"
+          Write-Host "BATAS       : maksimal 6 jam sejak job mulai"
+          Write-Host "========================================"
+
+      - name: Keep session alive for up to 6 hours
+        shell: powershell
+        run: |
+          $sessionStart = [long]$env:SESSION_START_UTC
+          $maximumSeconds = (6 * 60 * 60) - 180
+
+          while ($true) {
+              $elapsed = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds() - $sessionStart
+              $remaining = $maximumSeconds - $elapsed
+
+              if ($remaining -le 0) {
+                  Write-Host "Batas sesi hampir tercapai; job selesai sebelum timeout 6 jam."
+                  exit 0
+              }
+
+              Write-Host "Sisa waktu sesi: $([TimeSpan]::FromSeconds($remaining))"
+              Start-Sleep -Seconds ([Math]::Min(60, $remaining))
+          }
