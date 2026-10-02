@@ -2,6 +2,12 @@ name: Windows RDP 6 Hours
 
 on:
   workflow_dispatch:
+    inputs:
+      rdp_username:
+        description: Username untuk login Remote Desktop
+        required: true
+        default: rdpuser
+        type: string
 
 permissions:
   contents: read
@@ -39,8 +45,13 @@ jobs:
         shell: powershell
         env:
           RDP_PASSWORD: ${{ secrets.RDP_PASSWORD }}
+          RDP_USERNAME: ${{ inputs.rdp_username }}
         run: |
           $ErrorActionPreference = "Stop"
+
+          if ($env:RDP_USERNAME -notmatch '^[A-Za-z0-9_-]{1,20}$') {
+              throw "Username harus 1-20 karakter: huruf, angka, garis bawah, atau tanda hubung."
+          }
 
           Set-ItemProperty `
             -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server" `
@@ -59,24 +70,24 @@ jobs:
             -AsPlainText `
             -Force
 
-          $user = Get-LocalUser -Name "rdpuser" -ErrorAction SilentlyContinue
+              $user = Get-LocalUser -Name $env:RDP_USERNAME -ErrorAction SilentlyContinue
           if ($null -eq $user) {
               New-LocalUser `
-                -Name "rdpuser" `
+                -Name $env:RDP_USERNAME `
                 -Password $securePassword `
                 -PasswordNeverExpires `
                 -UserMayNotChangePassword `
                 -AccountNeverExpires | Out-Null
           } else {
-              Set-LocalUser -Name "rdpuser" -Password $securePassword
+              Set-LocalUser -Name $env:RDP_USERNAME -Password $securePassword
           }
 
           Add-LocalGroupMember `
             -Group "Remote Desktop Users" `
-            -Member "rdpuser" `
+            -Member $env:RDP_USERNAME `
             -ErrorAction SilentlyContinue
 
-          Enable-LocalUser -Name "rdpuser"
+          Enable-LocalUser -Name $env:RDP_USERNAME
           Set-Service -Name TermService -StartupType Automatic
           Restart-Service -Name TermService -Force
 
@@ -146,9 +157,13 @@ jobs:
         shell: powershell
         env:
           NGROK_AUTHTOKEN: ${{ secrets.NGROK_AUTHTOKEN }}
+          RDP_USERNAME: ${{ inputs.rdp_username }}
         run: |
           $ErrorActionPreference = "Stop"
           ngrok config add-authtoken $env:NGROK_AUTHTOKEN
+          if ($LASTEXITCODE -ne 0) {
+              throw "NGROK_AUTHTOKEN ditolak Ngrok. Periksa token di GitHub Secrets."
+            }
 
           Start-Process `
             -FilePath "ngrok.exe" `
@@ -177,7 +192,7 @@ jobs:
 
           Write-Host "========================================"
           Write-Host "RDP ADDRESS : $($tunnel.public_url)"
-          Write-Host "USERNAME    : rdpuser"
+          Write-Host "USERNAME    : $env:RDP_USERNAME"
           Write-Host "PASSWORD    : gunakan secret RDP_PASSWORD"
           Write-Host "BATAS       : maksimal 6 jam sejak job mulai"
           Write-Host "========================================"
